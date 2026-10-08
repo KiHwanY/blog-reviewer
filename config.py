@@ -6,6 +6,12 @@
 import os
 from functools import lru_cache
 
+# 임베딩 모델은 로컬 캐시만 쓴다. 이 값이 없으면 로딩할 때마다 Hugging Face에
+# 버전을 확인하러 가고, 연결이 불안정하면 시작이 몇 분씩 늦어진다.
+# huggingface 관련 import보다 먼저 설정해야 적용된다.
+# 모델을 처음 내려받을 때만 HF_HUB_OFFLINE=0으로 실행한다.
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+
 from dotenv import load_dotenv
 from langchain_anthropic import ChatAnthropic
 from langchain_huggingface import HuggingFaceEmbeddings
