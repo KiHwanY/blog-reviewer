@@ -1,0 +1,24 @@
+# 워크플로우
+langchain==1.4.3
+langgraph==1.2.14
+langgraph-checkpoint-postgres==3.1.2
+
+# 벡터 저장소 / DB
+langchain-postgres==0.0.19
+psycopg[binary]==3.3.6
+
+# LLM (Claude)
+langchain-anthropic==1.7.5
+
+# 임베딩 (bge-m3, 로컬 실행)
+langchain-huggingface==1.2.2
+sentence-transformers==6.1.0
+
+# 블로그 글 수집 / 분할
+requests==2.34.2
+beautifulsoup4==4.15.0
+langchain-text-splitters==1.1.3
+
+# 설정 / UI
+python-dotenv==1.2.4
+streamlit==1.65.0
