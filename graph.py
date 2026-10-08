@@ -1,7 +1,7 @@
 """블로그 글 리뷰 워크플로우 (LangGraph).
 
     retrieve → 세 페르소나 리뷰(병렬) → synthesize → 평균 7점 미만이면 revise → 다시 리뷰
-                                                  └ 7점 이상이거나 2회 수정했으면 종료
+                                                  └ 7점 이상, 2회 수정, 점수 정체 중 하나면 종료
 
     python graph.py                # samples/draft.md로 실행
     python graph.py 내초안.md
@@ -26,6 +26,7 @@ from psycopg.rows import dict_row
 import config
 import editor
 import reviewer
+import usage
 from retriever import retrieve
 
 GRAPH_IMAGE = Path("docs/graph.png")
@@ -47,6 +48,7 @@ class ReviewState(TypedDict, total=False):
     pass_score: float  # 이 점수 이상이면 수정 없이 끝낸다
     # 라운드별 기록: 리뷰한 초안, 세 리뷰, 평균 점수, 종합 결과
     history: Annotated[list[dict], operator.add]
+    usage: Annotated[list[dict], operator.add]  # LLM 호출별 토큰 수와 예상 비용
 
 
 # ---------- 노드 ----------
@@ -59,8 +61,9 @@ def make_review_node(persona: str):
     """페르소나 하나를 담당하는 리뷰 노드를 만든다."""
 
     def review_node(state: ReviewState) -> dict:
-        result = reviewer.review(persona, state["draft"], state["references"])
-        return {"reviews": {persona: result}}
+        with usage.track(f"{reviewer.PERSONAS[persona]} 리뷰") as used:
+            result = reviewer.review(persona, state["draft"], state["references"])
+        return {"reviews": {persona: result}, "usage": [used]}
 
     return review_node
 
@@ -68,7 +71,8 @@ def make_review_node(persona: str):
 def synthesize_node(state: ReviewState) -> dict:
     reviews = state["reviews"]
     average = editor.average_score(reviews)
-    synthesis = editor.synthesize(state["draft"], reviews)
+    with usage.track("종합") as used:
+        synthesis = editor.synthesize(state["draft"], reviews)
     round_record = {
         "round": state["revision_count"],
         "draft": state["draft"],
@@ -76,27 +80,48 @@ def synthesize_node(state: ReviewState) -> dict:
         "average_score": average,
         "synthesis": synthesis,
     }
-    return {"average_score": average, "synthesis": synthesis, "history": [round_record]}
+    return {
+        "average_score": average,
+        "synthesis": synthesis,
+        "history": [round_record],
+        "usage": [used],
+    }
 
 
 def revise_node(state: ReviewState) -> dict:
     original_draft = state["history"][0]["draft"]
-    revised = editor.revise(
-        state["draft"],
-        state["synthesis"],
-        state["references"],
-        max_chars=config.revision_char_limit(original_draft),
-    )
-    return {"draft": revised, "revision_count": state["revision_count"] + 1}
+    with usage.track("수정안 작성") as used:
+        revised = editor.revise(
+            state["draft"],
+            state["synthesis"],
+            state["references"],
+            max_chars=config.revision_char_limit(original_draft),
+        )
+    return {"draft": revised, "revision_count": state["revision_count"] + 1, "usage": [used]}
+
+
+STOP_MESSAGES = {
+    "passed": "평균 점수가 기준을 넘었습니다.",
+    "no_improvement": "수정해도 평균 점수가 오르지 않아 멈췄습니다.",
+    "max_revisions": "최대 수정 횟수에 도달했습니다.",
+}
+
+
+def stop_reason(state: ReviewState) -> str | None:
+    """리뷰를 끝낼 이유를 돌려준다. 계속 수정해야 하면 None."""
+    history = state["history"]
+    if state["average_score"] >= state.get("pass_score", config.PASS_SCORE):
+        return "passed"
+    # 직전 라운드보다 점수가 오르지 않았다면 더 고쳐도 비용만 든다
+    if len(history) >= 2 and history[-1]["average_score"] <= history[-2]["average_score"]:
+        return "no_improvement"
+    if state["revision_count"] >= config.MAX_REVISIONS:
+        return "max_revisions"
+    return None
 
 
 def should_revise(state: ReviewState) -> str:
-    """평균 점수가 기준 미만이고 수정 횟수가 남아 있으면 수정한다."""
-    if state["average_score"] >= state.get("pass_score", config.PASS_SCORE):
-        return "done"
-    if state["revision_count"] >= config.MAX_REVISIONS:
-        return "done"
-    return "revise"
+    return "done" if stop_reason(state) else "revise"
 
 
 # ---------- 그래프 ----------
@@ -153,13 +178,13 @@ def describe_update(node: str, output: dict) -> str:
         return f"기존 글 {len(titles)}편을 근거로 찾았습니다"
     if node.startswith("review_"):
         persona, review = next(iter(output["reviews"].items()))
-        return f"{reviewer.PERSONAS[persona]} 리뷰 완료: {review.score}점"
-    if node == "synthesize":
+        message = f"{reviewer.PERSONAS[persona]} 리뷰 완료: {review.score}점"
+    elif node == "synthesize":
         fixes = output["synthesis"].fixes
-        return f"종합 완료: 평균 {output['average_score']}점, 수정 사항 {len(fixes)}개"
-    if node == "revise":
-        return f"{output['revision_count']}차 수정안 작성 완료 ({len(output['draft']):,}자)"
-    return node
+        message = f"종합 완료: 평균 {output['average_score']}점, 수정 사항 {len(fixes)}개"
+    else:  # revise
+        message = f"{output['revision_count']}차 수정안 작성 완료 ({len(output['draft']):,}자)"
+    return f"{message} · {usage.describe(output['usage'][0])}"
 
 
 def save_graph_image(path: Path = GRAPH_IMAGE) -> None:
@@ -193,6 +218,8 @@ def main() -> None:
     for record in final["history"]:
         scores = {persona: review.score for persona, review in record["reviews"].items()}
         print(f"{round_label(record['round'])}: 평균 {record['average_score']}점 {scores}")
+    print(f"종료: {STOP_MESSAGES[stop_reason(final)]}")
+    print(f"사용량: {usage.describe(usage.total(final['usage']))}")
     print(f"\n[총평] {final['synthesis'].summary}")
     print("\n[남은 수정 사항]")
     print(editor.format_fixes(final["synthesis"].fixes))

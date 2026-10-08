@@ -7,6 +7,7 @@ import streamlit as st
 
 import config
 import graph
+import usage
 from reviewer import PERSONAS
 
 PRIORITY_COLORS = {"높음": "red", "중간": "orange", "낮음": "gray"}
@@ -46,7 +47,7 @@ def show_summary(result: dict) -> None:
     history = result["history"]
     first, last = history[0], history[-1]
     pass_score = result.get("pass_score", config.PASS_SCORE)
-    passed = last["average_score"] >= pass_score
+    used = result.get("usage", [])  # 사용량 기록을 넣기 전에 저장된 결과에는 없다
 
     with st.container(horizontal=True):
         st.metric("원본 평균", f"{first['average_score']}점", border=True)
@@ -58,15 +59,33 @@ def show_summary(result: dict) -> None:
         )
         st.metric("수정 횟수", f"{result['revision_count']}회", border=True)
         st.metric("기준 점수", f"{pass_score:g}점", border=True)
+        if used:
+            st.metric("예상 비용", f"${usage.total(used)['cost']:.2f}", border=True)
 
-    if passed:
-        st.success(f"평균 {last['average_score']}점으로 기준을 넘었습니다.", icon=":material/check_circle:")
+    reason = graph.stop_reason(result)
+    if reason == "passed":
+        st.success(graph.STOP_MESSAGES[reason], icon=":material/check_circle:")
     else:
         st.warning(
-            f"수정을 {result['revision_count']}회 했지만 평균 {last['average_score']}점으로 "
-            "기준에 못 미쳤습니다. 아래 남은 수정 사항을 확인해 주세요.",
+            f"{graph.STOP_MESSAGES[reason]} 평균 {last['average_score']}점으로 기준에 못 미쳤으니 "
+            "아래 남은 수정 사항을 확인해 주세요.",
             icon=":material/warning:",
         )
+
+    if used:
+        with st.expander("LLM 사용량", icon=":material/payments:"):
+            st.dataframe(
+                used + [usage.total(used)],
+                column_config={
+                    "step": "단계",
+                    "input_tokens": st.column_config.NumberColumn("입력 토큰", format="localized"),
+                    "output_tokens": st.column_config.NumberColumn("출력 토큰", format="localized"),
+                    "cost": st.column_config.NumberColumn("예상 비용", format="$%.3f"),
+                },
+                hide_index=True,
+                alt="LLM 호출별 토큰 사용량과 예상 비용",
+            )
+            st.caption("토큰 수에 공개 단가를 곱한 값입니다. 실제 청구액은 Anthropic 콘솔에서 확인하세요.")
 
 
 def show_reviews(record: dict) -> None:
