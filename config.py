@@ -45,9 +45,13 @@ def psycopg_url() -> str:
     return sqlalchemy_url().replace("postgresql+psycopg://", "postgresql://", 1)
 
 
-def get_llm() -> ChatAnthropic:
-    """리뷰와 수정안 생성에 쓰는 LLM. ANTHROPIC_API_KEY는 환경변수에서 자동으로 읽힌다."""
-    return ChatAnthropic(model=LLM_MODEL, max_tokens=16000)
+def get_llm(max_tokens: int = 16000) -> ChatAnthropic:
+    """리뷰와 수정안 생성에 쓰는 LLM. ANTHROPIC_API_KEY는 환경변수에서 자동으로 읽힌다.
+
+    max_tokens에는 모델의 생각(thinking) 분량도 포함된다. 긴 글을 통째로 받을 때는
+    넉넉히 주고, 그런 긴 응답은 타임아웃을 피하려고 스트리밍으로 받는다.
+    """
+    return ChatAnthropic(model=LLM_MODEL, max_tokens=max_tokens, streaming=max_tokens > 16000)
 
 
 @lru_cache(maxsize=1)
