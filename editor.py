@@ -70,13 +70,15 @@ def synthesize(draft: str, reviews: dict[str, Review]) -> Synthesis:
     return llm.invoke([("system", system), ("user", user_message)])
 
 
-def revise(draft: str, synthesis: Synthesis, references: list[Document]) -> str:
-    """수정 사항을 반영해 고쳐 쓴 글(마크다운)을 돌려준다."""
+def revise(draft: str, synthesis: Synthesis, references: list[Document], max_chars: int) -> str:
+    """수정 사항을 반영해 고쳐 쓴 글(마크다운)을 돌려준다. max_chars는 분량 상한이다."""
     system = (PROMPT_DIR / "revise.md").read_text(encoding="utf-8")
     user_message = (
         f"# 기존 글 발췌\n\n{format_references(references)}\n\n"
         f"# 초안\n\n<초안>\n{draft}\n</초안>\n\n"
         f"# 수정 사항\n\n{format_fixes(synthesis.fixes)}\n\n"
+        f"# 분량\n\n현재 초안은 {len(draft):,}자입니다. "
+        f"고쳐 쓴 글은 공백 포함 {max_chars:,}자를 넘기지 않습니다.\n\n"
         "수정 사항을 반영해 초안을 고쳐 써 주세요."
     )
     response = config.get_llm(max_tokens=REVISE_MAX_TOKENS).invoke(

@@ -31,6 +31,15 @@ EMBEDDING_DIM = 1024
 PASS_SCORE = 7.0  # 평균 점수가 이 값 미만이면 수정안을 만든다
 MAX_REVISIONS = 2  # 수정 → 재리뷰 반복 횟수 상한
 
+# 수정안 분량 상한: 원본의 몇 배까지 허용할지. 짧은 초안도 고칠 여유는 있도록 최소값을 둔다.
+REVISION_MAX_RATIO = 2.0
+REVISION_MIN_CHARS = 3000
+
+
+def revision_char_limit(original_draft: str) -> int:
+    """수정안이 넘지 말아야 할 글자 수. 라운드가 거듭돼도 항상 원본 길이를 기준으로 한다."""
+    return max(int(len(original_draft) * REVISION_MAX_RATIO), REVISION_MIN_CHARS)
+
 
 def sqlalchemy_url() -> str:
     """PGVector(SQLAlchemy)용 연결 문자열. .env의 값을 그대로 쓴다."""

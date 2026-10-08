@@ -80,7 +80,13 @@ def synthesize_node(state: ReviewState) -> dict:
 
 
 def revise_node(state: ReviewState) -> dict:
-    revised = editor.revise(state["draft"], state["synthesis"], state["references"])
+    original_draft = state["history"][0]["draft"]
+    revised = editor.revise(
+        state["draft"],
+        state["synthesis"],
+        state["references"],
+        max_chars=config.revision_char_limit(original_draft),
+    )
     return {"draft": revised, "revision_count": state["revision_count"] + 1}
 
 
