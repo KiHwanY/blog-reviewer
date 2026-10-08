@@ -3,8 +3,9 @@
     retrieve → 세 페르소나 리뷰(병렬) → synthesize → 평균 7점 미만이면 revise → 다시 리뷰
                                                   └ 7점 이상이거나 2회 수정했으면 종료
 
-    python graph.py                # samples/draft.md로 실행, docs/graph.png 저장
+    python graph.py                # samples/draft.md로 실행
     python graph.py 내초안.md
+    python graph.py --image        # 그래프 구조를 docs/graph.png로 저장
 """
 
 import operator
@@ -43,7 +44,9 @@ class ReviewState(TypedDict, total=False):
     average_score: float
     synthesis: editor.Synthesis
     revision_count: int
-    history: Annotated[list[dict], operator.add]  # 라운드별 초안과 점수 기록
+    pass_score: float  # 이 점수 이상이면 수정 없이 끝낸다
+    # 라운드별 기록: 리뷰한 초안, 세 리뷰, 평균 점수, 종합 결과
+    history: Annotated[list[dict], operator.add]
 
 
 # ---------- 노드 ----------
@@ -65,17 +68,15 @@ def make_review_node(persona: str):
 def synthesize_node(state: ReviewState) -> dict:
     reviews = state["reviews"]
     average = editor.average_score(reviews)
+    synthesis = editor.synthesize(state["draft"], reviews)
     round_record = {
         "round": state["revision_count"],
         "draft": state["draft"],
-        "scores": {persona: review.score for persona, review in reviews.items()},
+        "reviews": dict(reviews),
         "average_score": average,
+        "synthesis": synthesis,
     }
-    return {
-        "average_score": average,
-        "synthesis": editor.synthesize(state["draft"], reviews),
-        "history": [round_record],
-    }
+    return {"average_score": average, "synthesis": synthesis, "history": [round_record]}
 
 
 def revise_node(state: ReviewState) -> dict:
@@ -85,7 +86,7 @@ def revise_node(state: ReviewState) -> dict:
 
 def should_revise(state: ReviewState) -> str:
     """평균 점수가 기준 미만이고 수정 횟수가 남아 있으면 수정한다."""
-    if state["average_score"] >= config.PASS_SCORE:
+    if state["average_score"] >= state.get("pass_score", config.PASS_SCORE):
         return "done"
     if state["revision_count"] >= config.MAX_REVISIONS:
         return "done"
@@ -130,9 +131,29 @@ def open_graph() -> Iterator[CompiledStateGraph]:
         yield build_graph(checkpointer)
 
 
-def new_thread_config() -> dict:
+def thread_config(thread_id: str | None = None) -> dict:
     """리뷰 한 건마다 새 thread_id를 쓴다. 이 id로 나중에 결과를 다시 불러올 수 있다."""
-    return {"configurable": {"thread_id": str(uuid.uuid4())}}
+    return {"configurable": {"thread_id": thread_id or str(uuid.uuid4())}}
+
+
+def round_label(round_number: int) -> str:
+    return "원본" if round_number == 0 else f"{round_number}차 수정"
+
+
+def describe_update(node: str, output: dict) -> str:
+    """노드 하나가 끝났을 때 보여줄 진행 메시지."""
+    if node == "retrieve":
+        titles = dict.fromkeys(doc.metadata["title"] for doc in output["references"])
+        return f"기존 글 {len(titles)}편을 근거로 찾았습니다"
+    if node.startswith("review_"):
+        persona, review = next(iter(output["reviews"].items()))
+        return f"{reviewer.PERSONAS[persona]} 리뷰 완료: {review.score}점"
+    if node == "synthesize":
+        fixes = output["synthesis"].fixes
+        return f"종합 완료: 평균 {output['average_score']}점, 수정 사항 {len(fixes)}개"
+    if node == "revise":
+        return f"{output['revision_count']}차 수정안 작성 완료 ({len(output['draft']):,}자)"
+    return node
 
 
 def save_graph_image(path: Path = GRAPH_IMAGE) -> None:
@@ -145,36 +166,27 @@ def save_graph_image(path: Path = GRAPH_IMAGE) -> None:
 # ---------- 실행 ----------
 
 def main() -> None:
+    if "--image" in sys.argv:
+        save_graph_image()
+        print(f"그래프 이미지 저장: {GRAPH_IMAGE}")
+        return
+
     draft_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("samples/draft.md")
     draft = draft_path.read_text(encoding="utf-8")
 
-    save_graph_image()
-    print(f"그래프 이미지 저장: {GRAPH_IMAGE}")
-
-    thread = new_thread_config()
+    thread = thread_config()
     print(f"초안: {draft_path} / thread_id: {thread['configurable']['thread_id']}")
 
     with open_graph() as graph:
         for update in graph.stream({"draft": draft}, thread, stream_mode="updates"):
             for node, output in update.items():
-                if node == "retrieve":
-                    titles = dict.fromkeys(d.metadata["title"] for d in output["references"])
-                    print(f"[retrieve] 기존 글 {len(titles)}편")
-                elif node.startswith("review_"):
-                    persona, review = next(iter(output["reviews"].items()))
-                    print(f"[{node}] {reviewer.PERSONAS[persona]} {review.score}점")
-                elif node == "synthesize":
-                    fixes = output["synthesis"].fixes
-                    print(f"[synthesize] 평균 {output['average_score']}점, 수정 사항 {len(fixes)}개")
-                elif node == "revise":
-                    print(f"[revise] {output['revision_count']}차 수정안 ({len(output['draft'])}자)")
-
+                print(f"[{node}] {describe_update(node, output)}")
         final = graph.get_state(thread).values
 
     print("\n===== 결과 =====")
     for record in final["history"]:
-        label = "원본" if record["round"] == 0 else f"{record['round']}차 수정"
-        print(f"{label}: 평균 {record['average_score']}점 {record['scores']}")
+        scores = {persona: review.score for persona, review in record["reviews"].items()}
+        print(f"{round_label(record['round'])}: 평균 {record['average_score']}점 {scores}")
     print(f"\n[총평] {final['synthesis'].summary}")
     print("\n[남은 수정 사항]")
     print(editor.format_fixes(final["synthesis"].fixes))
