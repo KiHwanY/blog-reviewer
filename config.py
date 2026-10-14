@@ -31,13 +31,13 @@ EMBEDDING_DIM = 1024
 PASS_SCORE = 7.0  # 평균 점수가 이 값 미만이면 수정안을 만든다
 MAX_REVISIONS = 2  # 수정 → 재리뷰 반복 횟수 상한
 
-# 수정안 분량 상한: 원본의 몇 배까지 허용할지. 짧은 초안도 고칠 여유는 있도록 최소값을 둔다.
+# 수정안 분량 목표: 원본의 몇 배까지 허용할지. 짧은 초안도 고칠 여유는 있도록 최소값을 둔다.
 REVISION_MAX_RATIO = 2.0
 REVISION_MIN_CHARS = 3000
 
 
 def revision_char_limit(original_draft: str) -> int:
-    """수정안이 넘지 말아야 할 글자 수. 라운드가 거듭돼도 항상 원본 길이를 기준으로 한다."""
+    """수정안의 목표 글자 수. 라운드가 거듭돼도 항상 원본 길이를 기준으로 한다."""
     return max(int(len(original_draft) * REVISION_MAX_RATIO), REVISION_MIN_CHARS)
 
 
@@ -54,13 +54,17 @@ def psycopg_url() -> str:
     return sqlalchemy_url().replace("postgresql+psycopg://", "postgresql://", 1)
 
 
-def get_llm(max_tokens: int = 16000) -> ChatAnthropic:
+def get_llm(max_tokens: int = 16000, effort: str | None = None) -> ChatAnthropic:
     """리뷰와 수정안 생성에 쓰는 LLM. ANTHROPIC_API_KEY는 환경변수에서 자동으로 읽힌다.
 
     max_tokens에는 모델의 생각(thinking) 분량도 포함된다. 긴 글을 통째로 받을 때는
     넉넉히 주고, 그런 긴 응답은 타임아웃을 피하려고 스트리밍으로 받는다.
+    effort("low", "medium", "high")는 생각을 얼마나 깊게 할지 정한다. 생략하면 모델 기본값.
     """
-    return ChatAnthropic(model=LLM_MODEL, max_tokens=max_tokens, streaming=max_tokens > 16000)
+    options = {"output_config": {"effort": effort}} if effort else {}
+    return ChatAnthropic(
+        model=LLM_MODEL, max_tokens=max_tokens, streaming=max_tokens > 16000, **options
+    )
 
 
 @lru_cache(maxsize=1)

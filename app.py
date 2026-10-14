@@ -23,11 +23,18 @@ def run_review(draft: str, pass_score: float) -> None:
     with st.status("리뷰를 진행하고 있습니다", expanded=True) as status:
         with graph.open_graph() as workflow:
             inputs = {"draft": draft, "pass_score": pass_score}
-            for update in workflow.stream(inputs, thread, stream_mode="updates"):
-                for node, output in update.items():
-                    st.write(graph.describe_update(node, output))
-            st.session_state.result = workflow.get_state(thread).values
-        status.update(label="리뷰가 끝났습니다", state="complete", expanded=False)
+            try:
+                for update in workflow.stream(inputs, thread, stream_mode="updates"):
+                    for node, output in update.items():
+                        st.write(graph.describe_update(node, output))
+                status.update(label="리뷰가 끝났습니다", state="complete", expanded=False)
+            except Exception as error:
+                # 실패하기 전까지의 결과는 체크포인트에 남아 있으므로 그대로 보여준다
+                status.update(label="리뷰가 중간에 멈췄습니다", state="error")
+                st.error(f"실행 중 오류가 났습니다: {error}")
+            values = workflow.get_state(thread).values
+            if values.get("history"):
+                st.session_state.result = values
 
     # 주소에 thread_id를 남겨 두면 새로고침해도 체크포인트에서 결과를 다시 불러온다
     st.query_params["thread"] = thread["configurable"]["thread_id"]
@@ -62,12 +69,11 @@ def show_summary(result: dict) -> None:
         if used:
             st.metric("예상 비용", f"${usage.total(used)['cost']:.2f}", border=True)
 
-    reason = graph.stop_reason(result)
-    if reason == "passed":
-        st.success(graph.STOP_MESSAGES[reason], icon=":material/check_circle:")
+    if graph.stop_reason(result) == "passed":
+        st.success(graph.stop_message(result), icon=":material/check_circle:")
     else:
         st.warning(
-            f"{graph.STOP_MESSAGES[reason]} 평균 {last['average_score']}점으로 기준에 못 미쳤으니 "
+            f"{graph.stop_message(result)} 평균 {last['average_score']}점으로 기준에 못 미쳤으니 "
             "아래 남은 수정 사항을 확인해 주세요.",
             icon=":material/warning:",
         )

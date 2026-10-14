@@ -5,6 +5,7 @@
 
     python graph.py                # samples/draft.md로 실행
     python graph.py 내초안.md
+    python graph.py --resume <id>  # 중간에 실패한 리뷰를 이어서 실행
     python graph.py --image        # 그래프 구조를 docs/graph.png로 저장
 """
 
@@ -120,6 +121,11 @@ def stop_reason(state: ReviewState) -> str | None:
     return None
 
 
+def stop_message(state: ReviewState) -> str:
+    """리뷰가 끝난 이유를 사람이 읽을 문장으로 돌려준다."""
+    return STOP_MESSAGES.get(stop_reason(state), "리뷰가 끝나기 전에 멈췄습니다.")
+
+
 def should_revise(state: ReviewState) -> str:
     return "done" if stop_reason(state) else "revise"
 
@@ -202,30 +208,42 @@ def main() -> None:
         print(f"그래프 이미지 저장: {GRAPH_IMAGE}")
         return
 
-    draft_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("samples/draft.md")
-    draft = draft_path.read_text(encoding="utf-8")
-
-    thread = thread_config()
-    print(f"초안: {draft_path} / thread_id: {thread['configurable']['thread_id']}")
+    if "--resume" in sys.argv:
+        # 중간에 실패한 리뷰를 체크포인트에서 이어서 실행한다
+        thread = thread_config(sys.argv[sys.argv.index("--resume") + 1])
+        inputs = None
+    else:
+        draft_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("samples/draft.md")
+        thread = thread_config()
+        inputs = {"draft": draft_path.read_text(encoding="utf-8")}
+        print(f"초안: {draft_path}")
+    thread_id = thread["configurable"]["thread_id"]
+    print(f"thread_id: {thread_id}")
 
     with open_graph() as graph:
-        for update in graph.stream({"draft": draft}, thread, stream_mode="updates"):
-            for node, output in update.items():
-                print(f"[{node}] {describe_update(node, output)}")
+        try:
+            for update in graph.stream(inputs, thread, stream_mode="updates"):
+                for node, output in update.items():
+                    print(f"[{node}] {describe_update(node, output)}")
+        except Exception as error:
+            print(f"\n실행 중 오류: {error}")
+            print(f"이어서 실행: python graph.py --resume {thread_id}")
         final = graph.get_state(thread).values
 
+    if not final.get("history"):
+        return
     print("\n===== 결과 =====")
     for record in final["history"]:
         scores = {persona: review.score for persona, review in record["reviews"].items()}
         print(f"{round_label(record['round'])}: 평균 {record['average_score']}점 {scores}")
-    print(f"종료: {STOP_MESSAGES[stop_reason(final)]}")
+    print(f"종료: {stop_message(final)}")
     print(f"사용량: {usage.describe(usage.total(final['usage']))}")
     print(f"\n[총평] {final['synthesis'].summary}")
     print("\n[남은 수정 사항]")
     print(editor.format_fixes(final["synthesis"].fixes))
 
     if final["revision_count"]:
-        output_path = draft_path.with_name(f"{draft_path.stem}.revised.md")
+        output_path = Path(f"revised_{thread_id[:8]}.md")
         output_path.write_text(final["draft"], encoding="utf-8")
         print(f"\n최종 수정안 저장: {output_path}")
 

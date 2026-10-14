@@ -15,7 +15,10 @@ from retriever import format_references
 from reviewer import PERSONAS, Review
 
 PROMPT_DIR = Path(__file__).parent / "prompts"
-REVISE_MAX_TOKENS = 64000  # 글 전체를 다시 쓰므로 넉넉히 준다
+# 글 전체를 다시 쓰므로 리뷰보다 넉넉히 준다. 다만 생각이 길어져 비용이 튀는 것을 막으려고
+# 상한은 두고, 생각은 얕게(low) 하도록 한다.
+REVISE_MAX_TOKENS = 32000
+REVISE_EFFORT = "low"
 
 
 class Fix(BaseModel):
@@ -71,17 +74,17 @@ def synthesize(draft: str, reviews: dict[str, Review]) -> Synthesis:
 
 
 def revise(draft: str, synthesis: Synthesis, references: list[Document], max_chars: int) -> str:
-    """수정 사항을 반영해 고쳐 쓴 글(마크다운)을 돌려준다. max_chars는 분량 상한이다."""
+    """수정 사항을 반영해 고쳐 쓴 글(마크다운)을 돌려준다. max_chars는 분량 목표다."""
     system = (PROMPT_DIR / "revise.md").read_text(encoding="utf-8")
     user_message = (
         f"# 기존 글 발췌\n\n{format_references(references)}\n\n"
         f"# 초안\n\n<초안>\n{draft}\n</초안>\n\n"
         f"# 수정 사항\n\n{format_fixes(synthesis.fixes)}\n\n"
         f"# 분량\n\n현재 초안은 {len(draft):,}자입니다. "
-        f"고쳐 쓴 글은 공백 포함 {max_chars:,}자를 넘기지 않습니다.\n\n"
+        f"고쳐 쓴 글은 {max_chars:,}자 안팎으로 맞춥니다.\n\n"
         "수정 사항을 반영해 초안을 고쳐 써 주세요."
     )
-    response = config.get_llm(max_tokens=REVISE_MAX_TOKENS).invoke(
+    response = config.get_llm(max_tokens=REVISE_MAX_TOKENS, effort=REVISE_EFFORT).invoke(
         [("system", system), ("user", user_message)]
     )
     if response.response_metadata.get("stop_reason") == "max_tokens":
