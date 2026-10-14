@@ -23,3 +23,10 @@ headingFont = "'Noto Serif KR':https://fonts.googleapis.com/css2?family=Noto+Ser
 [theme.sidebar]
 backgroundColor = "#F3F1EC"
 secondaryBackgroundColor = "#FBFAF6"
+
+[server]
+# 코드가 바뀌면 자동으로 다시 불러오는 감시 기능을 끈다.
+# 이 기능은 실행할 때마다 불러온 모든 모듈을 훑는데, transformers(임베딩)를 훑느라
+# 매번 몇 초씩 걸려 로그인 화면과 리뷰 화면이 늦게 떴다.
+# 대신 코드를 고친 뒤에는 서버를 다시 켜야 반영된다.
+fileWatcherType = "none"
