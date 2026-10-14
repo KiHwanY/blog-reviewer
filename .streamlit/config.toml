@@ -1,0 +1,25 @@
+# 로그인 화면의 "편집실" 색감(미색 + 짙은 초록)을 앱 전체에 맞춘다.
+[theme]
+base = "light"
+primaryColor = "#1E4D3A"
+backgroundColor = "#FBFAF6"
+secondaryBackgroundColor = "#F3F1EC"
+textColor = "#1F2421"
+linkColor = "#1E4D3A"
+borderColor = "#E3E0D8"
+showWidgetBorder = true
+baseRadius = "10px"
+codeBackgroundColor = "#F3F1EC"
+dataframeHeaderBackgroundColor = "#F3F1EC"
+# 상태 색은 의미(높음·중간·낮음)를 유지하되 미색 바탕에 맞게 채도를 낮춘다
+redColor = "#B3412F"
+orangeColor = "#B7791F"
+greenColor = "#1E4D3A"
+grayColor = "#6B6F6A"
+blueColor = "#2F5D62"
+# 제목은 로그인 화면의 큰 제목과 같은 명조체
+headingFont = "'Noto Serif KR':https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@500;700&display=swap"
+
+[theme.sidebar]
+backgroundColor = "#F3F1EC"
+secondaryBackgroundColor = "#FBFAF6"

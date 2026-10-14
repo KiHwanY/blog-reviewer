@@ -2,14 +2,18 @@
 
 내 PC에서 혼자 쓰는 도구를 위한 간단한 잠금이다. 사용자 구분이 없고,
 로그인 상태는 브라우저 세션에만 남아서 새로고침하면 다시 로그인해야 한다.
+
+로그인 화면이 바로 뜨도록, 이 파일은 LLM·임베딩 라이브러리를 불러오는
+config.py를 import하지 않고 .env만 직접 읽는다.
 """
 
 import hmac
 import os
 
 import streamlit as st
+from dotenv import load_dotenv
 
-import config  # noqa: F401  (.env를 읽어 둔다)
+load_dotenv()
 
 
 def check_credentials(username: str, password: str) -> bool:

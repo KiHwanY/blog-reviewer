@@ -77,6 +77,7 @@ blog-reviewer/
 │  ├─ synthesize.md   # 종합(편집장)
 │  └─ revise.md       # 수정안 작성
 ├─ samples/           # 테스트용 초안과 그 수정안
+├─ .streamlit/config.toml  # 앱 전체 색 테마 (미색 + 짙은 초록, 제목은 명조체)
 └─ docs/graph.png     # 그래프 구조 이미지
 ```
 
